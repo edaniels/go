@@ -378,8 +378,9 @@ type g struct {
 	sigcode0       uintptr
 	sigcode1       uintptr
 	sigpc          uintptr
-	gopc           uintptr // pc of go statement that created this goroutine
-	startpc        uintptr // pc of goroutine function
+	gopc           uintptr        // pc of go statement that created this goroutine
+	ancestors      []ancestorInfo // ancestor information goroutine(s) that created this goroutine
+	startpc        uintptr        // pc of goroutine function
 	racectx        uintptr
 	waiting        *sudog         // sudog structures this g is waiting on (that have a valid elem ptr); in lock order
 	cgoCtxt        []uintptr      // cgo traceback context
@@ -741,6 +742,14 @@ type stkframe struct {
 	argp     uintptr    // pointer to function arguments
 	arglen   uintptr    // number of bytes at argp
 	argmap   *bitvector // force use of this argmap
+}
+
+// ancestorInfo details information about a goroutine that
+// was an ancestor of another goroutine.
+type ancestorInfo struct {
+	pcs  []uintptr // pcs from the stack of this goroutine
+	goid int64     // goroutine id of this goroutine; original goroutine possibly dead
+	gopc uintptr   // pc of go statement that created this goroutine
 }
 
 const (

@@ -3224,16 +3224,17 @@ func malg(stacksize int32) *g {
 //go:nosplit
 func newproc(siz int32, fn *funcval) {
 	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
+	gp := getg()
 	pc := getcallerpc()
 	systemstack(func() {
-		newproc1(fn, (*uint8)(argp), siz, pc)
+		newproc1(fn, (*uint8)(argp), siz, gp, pc)
 	})
 }
 
 // Create a new g running fn with narg bytes of arguments starting
 // at argp. callerpc is the address of the go statement that created
 // this. The new g is put on the queue of g's waiting to run.
-func newproc1(fn *funcval, argp *uint8, narg int32, callerpc uintptr) {
+func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintptr) {
 	_g_ := getg()
 
 	if fn == nil {
@@ -3301,6 +3302,7 @@ func newproc1(fn *funcval, argp *uint8, narg int32, callerpc uintptr) {
 	newg.sched.g = guintptr(unsafe.Pointer(newg))
 	gostartcallfn(&newg.sched, fn)
 	newg.gopc = callerpc
+	newg.ancestors = capturecallerinfo(callergp)
 	newg.startpc = fn.fn
 	if _g_.m.curg != nil {
 		newg.labels = _g_.m.curg.labels
@@ -3336,6 +3338,33 @@ func newproc1(fn *funcval, argp *uint8, narg int32, callerpc uintptr) {
 	if _g_.m.locks == 0 && _g_.preempt { // restore the preemption request in case we've cleared it in newstack
 		_g_.stackguard0 = stackPreempt
 	}
+}
+
+// capturecallerinfo copies previous ancestors of the given caller g and
+// includes infor for the current caller into a new set of tracebacks for
+// a g being created.
+func capturecallerinfo(callergp *g) []ancestorInfo {
+	// Copy all prior info, except for the root goroutine (goid 0).
+	if debug.tracebackancestors <= 0 || callergp.goid == 0 {
+		return nil
+	}
+	ancestorstocopy := int32(len(callergp.ancestors))
+	if ancestorstocopy+1 > debug.tracebackancestors {
+		ancestorstocopy = debug.tracebackancestors - 1
+	}
+	ancestors := make([]ancestorInfo, ancestorstocopy+1)
+	copy(ancestors[1:], callergp.ancestors[:ancestorstocopy])
+
+	var pcs [_TracebackMaxFrames]uintptr
+	npcs := gcallers(callergp, 0, pcs[:])
+	ipcs := make([]uintptr, npcs)
+	copy(ipcs, pcs[:npcs])
+	ancestors[0] = ancestorInfo{
+		pcs:  ipcs,
+		goid: callergp.goid,
+		gopc: callergp.gopc,
+	}
+	return ancestors
 }
 
 // Put on gfree list.
